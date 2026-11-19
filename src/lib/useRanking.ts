@@ -3,7 +3,7 @@ import { DESTINATIONS } from '../data/destinations';
 import { rankDestinations, type RankResult, type WeatherStats } from '../engine/ranking';
 import { weatherForAll } from '../providers/weather';
 import { cacheGetStale } from './db';
-import { useOnline, useUserQuotes } from './hooks';
+import { useOnline, useTransferContext, useUserQuotes } from './hooks';
 import type { Profile, SearchParams } from './types';
 
 export interface WeatherLoad {
@@ -55,10 +55,11 @@ export function useMonthWeather(month: number, enabled: boolean): [Record<string
 
 export function useRanking(params: SearchParams, profile: Profile, fetchWeather = true): { result: RankResult; weather: WeatherLoad } {
   const quotes = useUserQuotes(profile);
+  const transfer = useTransferContext(profile);
   const [wx, load] = useMonthWeather(params.month, fetchWeather);
   const result = useMemo(
-    () => rankDestinations(params, { minAcceptableCpp: profile.minAcceptableCpp, weather: wx, quotes }),
-    [params, profile.minAcceptableCpp, wx, quotes],
+    () => rankDestinations(params, { minAcceptableCpp: profile.minAcceptableCpp, weather: wx, quotes, transfer }),
+    [params, profile.minAcceptableCpp, wx, quotes, transfer],
   );
   return { result, weather: load };
 }

@@ -5,6 +5,7 @@ import type { TripEstimate } from '../engine/ranking';
 import { wikiSummary, type WikiSummary } from '../providers/wiki';
 import { ptsRange, usdRange } from '../lib/format';
 import { Badge, QualityBadge } from './ui';
+import { BonusPrice } from './BonusPrice';
 
 const imgMemo = new Map<string, WikiSummary | null>();
 
@@ -73,10 +74,11 @@ export function DestinationCard({ t, rank, onOpen, saved, onToggleSave, badge }:
             <div className="tabular font-semibold">{usdRange(s.cashRange)}</div>
           </div>
           <div>
-            <div className="text-slate-500">Points</div>
-            <div className="tabular font-semibold">{s.points ? ptsRange(s.pointsRange) : 'None — pay cash'}</div>
+            <div className="text-slate-500">{s.flightMethod === 'award' && t.flight.awardProgram ? 'Points (no bonus)' : 'Points'}</div>
+            <div className="tabular font-semibold">{s.points ? ptsRange(s.pointsRangeNoBonus) : 'None — pay cash'}</div>
           </div>
         </div>
+        <BonusPrice t={t} compact />
         <p className="line-clamp-2 text-xs text-slate-600 dark:text-slate-400">
           {s.label}
           {s.cpp != null && <span className="tabular"> · ≈{s.cpp.toFixed(2)}¢/pt</span>}

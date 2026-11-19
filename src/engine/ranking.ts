@@ -22,6 +22,7 @@ import {
   mid,
   scaleRange,
 } from './estimates';
+import { programOptions, rankingAwardOption, rankingReportedOption, type TransferContext } from './playbook';
 
 // ------------------------------------------------------------------ types
 
@@ -50,6 +51,26 @@ export interface RankContext {
   minAcceptableCpp: number;
   weather: Record<string, WeatherStats | undefined>;
   quotes: Record<string, UserQuote[] | undefined>;
+  /** Partners + bonuses. When present, transfer bonuses YOU VERIFIED lower award estimates. */
+  transfer?: TransferContext;
+}
+
+export interface AwardProgramUsed {
+  partnerId: string;
+  name: string;
+  currency: string;
+  bonusPercent: number;
+  /** Chase points the same estimate would need with no bonus */
+  pointsNoBonus: Range;
+}
+
+/** A bonus reported by a third party but NOT verified by you — shown, never applied. */
+export interface ReportedBonusHint {
+  partnerId: string;
+  name: string;
+  bonusPercent: number;
+  /** Chase points for the flight award IF the bonus is real */
+  pointsIfReal: Range;
 }
 
 export type StrategyId = 'cash-both' | 'points-flight' | 'points-hotel' | 'points-both';
@@ -61,6 +82,8 @@ export interface Strategy {
   cashRange: Range;
   points: number;
   pointsRange: Range;
+  /** Same strategy with NO transfer bonus (equals pointsRange unless a verified bonus applies) */
+  pointsRangeNoBonus: Range;
   flightMethod: 'cash' | 'award' | 'chase-travel';
   hotelMethod: 'cash' | 'hyatt' | 'chase-travel';
   /** blended value per point used, cents */
@@ -101,6 +124,10 @@ export interface TripEstimate {
     awardFees: Range;
     chaseTravelPoints: Range;
     awardCpp: number | null;
+    /** Set when a verified transfer bonus made one program the cheapest estimate */
+    awardProgram: AwardProgramUsed | null;
+    /** Best reported-but-unverified bonus, when no verified one applies */
+    reportedBonus: ReportedBonusHint | null;
     quality: DataQuality;
     note: string;
   };
@@ -245,13 +272,32 @@ export function estimateTrip(dest: Destination, params: SearchParams, ctx: RankC
   const flightCash = scaleRange(fareRange, travelers);
   let awardPoints: Range | null;
   let awardFees: Range;
+  let awardProgram: AwardProgramUsed | null = null;
+  let reportedBonus: ReportedBonusHint | null = null;
   if (flightQuote && flightQuote.pointsPerUnit) {
     awardPoints = scaleRange([flightQuote.pointsPerUnit, flightQuote.pointsPerUnit], travelers);
     awardFees = scaleRange([flightQuote.feesPerUnit, flightQuote.feesPerUnit], travelers);
   } else {
-    // airline partners transfer 1:1; transfer bonuses are NOT assumed in estimates
+    // airline partners transfer 1:1; only bonuses the user VERIFIED on Chase are applied
     awardPoints = card.transferEligible ? scaleRange(estimateAwardMiles(dist, cabin, dest.domestic), travelers) : null;
     awardFees = scaleRange(estimateAwardFees(dest.region, dest.domestic, cabin), travelers);
+    if (awardPoints && ctx.transfer) {
+      const options = programOptions(dest, dist, cabin, travelers, flightCash, params.cardId, ctx.transfer);
+      const opt = rankingAwardOption(options);
+      if (opt && mid(opt.chasePoints) < mid(opt.chasePointsNoBonus)) {
+        awardProgram = {
+          partnerId: opt.partner.id,
+          name: opt.partner.name,
+          currency: opt.guide.currency,
+          bonusPercent: opt.verifiedBonus!.bonusPercent,
+          pointsNoBonus: opt.chasePointsNoBonus,
+        };
+        awardPoints = opt.chasePoints;
+      } else {
+        const rep = rankingReportedOption(options);
+        if (rep) reportedBonus = { partnerId: rep.partner.id, name: rep.partner.name, bonusPercent: rep.reportedBonus!.bonusPercent, pointsIfReal: rep.chasePointsIfReported! };
+      }
+    }
   }
   const chaseTravelPoints: Range = [Math.ceil((flightCash[0] * 100) / card.travelBaseCpp), Math.ceil((flightCash[1] * 100) / card.travelBaseCpp)];
   const awardCpp = awardPoints ? ((mid(flightCash) - mid(awardFees)) / mid(awardPoints)) * 100 : null;
@@ -290,6 +336,8 @@ export function estimateTrip(dest: Destination, params: SearchParams, ctx: RankC
   const make = (id: StrategyId, useF: boolean, useH: boolean): Strategy => {
     const cashRange = addRanges(fixedCash, useF ? flightPts.fees : flightCash, useH ? [0, 0] : hotelCash);
     const pointsRange = addRanges(useF ? flightPts.points : [0, 0], useH ? hotelPts.points : [0, 0]);
+    const flightNoBonus = flightPts.method === 'award' && awardProgram ? awardProgram.pointsNoBonus : flightPts.points;
+    const pointsRangeNoBonus = addRanges(useF ? flightNoBonus : [0, 0], useH ? hotelPts.points : [0, 0]);
     const cash = mid(cashRange);
     const points = mid(pointsRange);
     const saved = allCashMid - cash;
@@ -302,6 +350,7 @@ export function estimateTrip(dest: Destination, params: SearchParams, ctx: RankC
       cashRange,
       points,
       pointsRange,
+      pointsRangeNoBonus,
       flightMethod: useF ? flightPts.method : 'cash',
       hotelMethod: useH ? hotelPts.method : 'cash',
       cpp,
@@ -380,7 +429,7 @@ export function estimateTrip(dest: Destination, params: SearchParams, ctx: RankC
   const estimateOnly = !flightQuote && !hotelQuote;
 
   const reasons = buildReasons({
-    dest, recommended, params, flightHours, origin, awardCpp, hyattCpp, weatherInfo, styles, scores, flightQuote: !!flightQuote, hotelQuote: !!hotelQuote, minCpp: ctx.minAcceptableCpp, baseCpp: card.travelBaseCpp,
+    dest, recommended, params, flightHours, origin, awardCpp, hyattCpp, weatherInfo, styles, scores, flightQuote: !!flightQuote, hotelQuote: !!hotelQuote, minCpp: ctx.minAcceptableCpp, baseCpp: card.travelBaseCpp, awardProgram,
   });
 
   return {
@@ -398,6 +447,8 @@ export function estimateTrip(dest: Destination, params: SearchParams, ctx: RankC
       awardFees,
       chaseTravelPoints,
       awardCpp,
+      awardProgram,
+      reportedBonus,
       quality: flightQuote ? 'user' : 'estimate',
       note: flightQuote ? `Using your recorded quote: ${flightQuote.label}` : 'Distance-based estimate — not a fare quote.',
     },
@@ -445,6 +496,7 @@ const methodLabel = (m: Strategy['flightMethod'] | Strategy['hotelMethod']) =>
 function buildReasons(a: {
   dest: Destination; recommended: Strategy; params: SearchParams; flightHours: number; origin: DepartureAirport; awardCpp: number | null; hyattCpp: number | null;
   weatherInfo: TripEstimate['weatherInfo']; styles: TripStyle[]; scores: Scores; flightQuote: boolean; hotelQuote: boolean; minCpp: number; baseCpp: number;
+  awardProgram: AwardProgramUsed | null;
 }): string[] {
   const r: string[] = [];
   const s = a.recommended;
@@ -454,7 +506,10 @@ function buildReasons(a: {
   );
   if (s.id === 'cash-both') r.push(`Paying cash looks better than spending points here — estimated point values don't beat your ${a.minCpp.toFixed(2)}¢ minimum. Save the points.`);
   else {
-    if (s.flightMethod !== 'cash') r.push(`Flights via ${methodLabel(s.flightMethod)}${a.awardCpp != null && s.flightMethod === 'award' ? ` (~${a.awardCpp.toFixed(2)}¢/pt est.)` : ` (${a.baseCpp.toFixed(2)}¢/pt)`}.`);
+    if (s.flightMethod !== 'cash') {
+      const via = s.flightMethod === 'award' && a.awardProgram ? `${a.awardProgram.name} ${a.awardProgram.currency} (your verified +${a.awardProgram.bonusPercent}% transfer bonus applied)` : methodLabel(s.flightMethod);
+      r.push(`Flights via ${via}${a.awardCpp != null && s.flightMethod === 'award' ? ` (~${a.awardCpp.toFixed(2)}¢/pt est.)` : ` (${a.baseCpp.toFixed(2)}¢/pt)`}.`);
+    }
     if (s.hotelMethod !== 'cash') r.push(`Hotel via ${methodLabel(s.hotelMethod)}${a.hyattCpp != null && s.hotelMethod === 'hyatt' ? ` (~${a.hyattCpp.toFixed(2)}¢/pt vs a comparable mid-range room)` : ''}.`);
   }
   r.push(`≈${a.flightHours} h nonstop-equivalent from ${a.origin.code}${a.origin.groundCost ? ` (+$${a.origin.groundCost} to reach the airport)` : ''}; connections add time.`);
@@ -487,7 +542,9 @@ export function rankDestinations(params: SearchParams, ctx: RankContext, catalog
 
   const notes = [
     'All prices are estimates unless marked "Your quote". Search links open real searches — they do not confirm availability.',
-    'Award estimates assume typical saver-level pricing and no transfer bonus.',
+    ctx.transfer
+      ? 'Award estimates assume typical saver-level pricing. Transfer bonuses you’ve verified on Chase are applied; unverified ones are not.'
+      : 'Award estimates assume typical saver-level pricing and no transfer bonus.',
   ];
   if (params.maxLayovers != null) notes.push('Max layovers can’t be applied to estimates; it’s saved for when you record real itineraries.');
 

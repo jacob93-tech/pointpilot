@@ -5,8 +5,20 @@ import type { Comparison, Profile, SearchParams } from './types';
 import type { UserQuote } from '../engine/ranking';
 import { summarizeComparison } from '../engine/redemption';
 import { todayISO } from '../engine/transfer';
+import type { TransferContext } from '../engine/playbook';
 
 const FALLBACK_PROFILE = defaultProfile();
+
+/** Partners + bonuses for transfer math, stable while unchanged. Undefined until IndexedDB loads. */
+export function useTransferContext(profile: Profile): TransferContext | undefined {
+  const partners = useLiveQuery(() => db.partners.toArray(), []);
+  const bonuses = useLiveQuery(() => db.bonuses.toArray(), []);
+  const today = todayISO();
+  return useMemo(
+    () => (partners && bonuses ? { partners, bonuses, today, verifyWindowDays: profile.bonusVerifyWindowDays } : undefined),
+    [partners, bonuses, today, profile.bonusVerifyWindowDays],
+  );
+}
 
 export function useProfile(): Profile {
   // stable fallback identity while IndexedDB loads (prevents render loops in memoized consumers)

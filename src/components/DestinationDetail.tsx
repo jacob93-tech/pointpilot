@@ -5,33 +5,26 @@ import type { TripEstimate } from '../engine/ranking';
 import type { Profile, SearchParams } from '../lib/types';
 import { flightLinks, hotelLinks, advisoryLink } from '../lib/links';
 import { cpp, pts, ptsRange, usd, usdRange } from '../lib/format';
-import { addDays, monthDates, dayOfWeek } from '../engine/flexDates';
+import { suggestDates } from '../engine/playbook';
 import { mid } from '../engine/estimates';
 import { getCard } from '../data/cards';
-import { Badge, Button, ExternalLink, Modal, Notice, QualityBadge, ScoreBar } from './ui';
+import { Badge, Button, ExternalLink, Modal, Notice, QualityBadge, ScoreBar, Tabs } from './ui';
+import { BookingPlan } from './BookingPlan';
+import { BonusPrice } from './BonusPrice';
 import { DestinationImage, useWiki } from './DestinationCard';
 import { createTripFromDestination } from '../lib/actions';
 import { useToast } from './ui';
 
-export function suggestDates(params: SearchParams, days: number): { depart: string; ret: string } {
-  if (params.dateMode === 'specific' && params.departDates[0]) {
-    const ret = params.returnDates.find((r) => r > params.departDates[0]) ?? addDays(params.departDates[0], days - 1);
-    return { depart: params.departDates[0], ret };
-  }
-  if (params.dateMode === 'range' && params.rangeStart) return { depart: params.rangeStart, ret: addDays(params.rangeStart, days - 1) };
-  // second Thursday/Friday of the month as a neutral starting point
-  const fridays = monthDates(params.year, params.month).filter((d) => dayOfWeek(d) === 5);
-  const dep = fridays[1] ?? fridays[0];
-  return { depart: dep, ret: addDays(dep, days - 1) };
-}
+export { suggestDates };
 
 export function DestinationDetail({ t, params, profile, onClose, saved, onToggleSave }: { t: TripEstimate | null; params: SearchParams; profile: Profile; onClose: () => void; saved: boolean; onToggleSave: () => void }) {
   const nav = useNavigate();
   const toast = useToast();
   const initial = useMemo(() => (t ? suggestDates(params, t.days) : { depart: '', ret: '' }), [t, params]);
   const [dates, setDates] = useState(initial);
+  const [tab, setTab] = useState<'book' | 'overview'>('book');
   const [lastT, setLastT] = useState(t);
-  if (t !== lastT) { setLastT(t); setDates(initial); }
+  if (t !== lastT) { setLastT(t); setDates(initial); if (t?.destination.id !== lastT?.destination.id) setTab('book'); }
   const wiki = useWiki(t?.destination.wikiTitle);
   if (!t) return null;
   const d = t.destination;
@@ -44,7 +37,11 @@ export function DestinationDetail({ t, params, profile, onClose, saved, onToggle
 
   return (
     <Modal open={!!t} onClose={onClose} title={d.name} wide>
-      <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+      <div className="mb-4">
+        <Tabs tabs={[{ id: 'book', label: 'How to book with points' }, { id: 'overview', label: 'Overview & costs' }]} value={tab} onChange={setTab} />
+      </div>
+      {tab === 'book' && <BookingPlan t={t} params={params} profile={profile} dates={dates} setDates={setDates} />}
+      <div className={tab === 'overview' ? 'grid gap-5 lg:grid-cols-[1fr_320px]' : 'hidden'}>
         <div className="space-y-5">
           <div className="overflow-hidden rounded-xl">
             <DestinationImage title={d.wikiTitle} alt={d.name} className="h-48 w-full sm:h-60" />
@@ -74,6 +71,8 @@ export function DestinationDetail({ t, params, profile, onClose, saved, onToggle
             )}
           </section>
 
+          <BonusPrice t={t} />
+
           <section>
             <h3 className="mb-2 text-sm font-semibold">How to pay — four strategies compared</h3>
             <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
@@ -98,7 +97,14 @@ export function DestinationDetail({ t, params, profile, onClose, saved, onToggle
                         {s.id === t.recommended.id && <Badge tone="brand">Recommended</Badge>}
                       </td>
                       <td className="tabular px-3 py-2 text-right">{usdRange(s.cashRange)}</td>
-                      <td className="tabular px-3 py-2 text-right">{s.points ? ptsRange(s.pointsRange) : '—'}</td>
+                      <td className="tabular px-3 py-2 text-right">
+                        {s.points ? ptsRange(s.pointsRangeNoBonus) : '—'}
+                        {s.flightMethod === 'award' && t.flight.awardProgram && (
+                          <div className="mt-0.5 inline-block rounded-full bg-gradient-to-r from-fuchsia-600 via-pink-500 to-orange-400 px-2 py-0.5 text-[11px] font-bold text-white">
+                            ✨ {ptsRange(s.pointsRange)} w/ bonus
+                          </div>
+                        )}
+                      </td>
                       <td className="tabular px-3 py-2 text-right">{cpp(s.cpp)}</td>
                       <td className="px-3 py-2 text-xs">
                         {s.withinBudget ? <span className="text-emerald-600">Budget ✓</span> : <span className="text-rose-600">Over budget</span>}
@@ -123,7 +129,7 @@ export function DestinationDetail({ t, params, profile, onClose, saved, onToggle
                 label="Award (typical saver range)"
                 q={t.flight.quality}
                 value={t.flight.awardPoints ? `${ptsRange(t.flight.awardPoints)} pts + ${usdRange(t.flight.awardFees)}` : 'Transfers not available on this card'}
-                note={t.flight.awardCpp != null ? `≈${t.flight.awardCpp.toFixed(2)}¢/pt at midpoints. No transfer bonus assumed.` : undefined}
+                note={t.flight.awardCpp != null ? `≈${t.flight.awardCpp.toFixed(2)}¢/pt at midpoints. ${t.flight.awardProgram ? `Includes your verified +${t.flight.awardProgram.bonusPercent}% ${t.flight.awardProgram.name} bonus (${ptsRange(t.flight.awardProgram.pointsNoBonus)} without it).` : 'No verified transfer bonus applied.'}` : undefined}
               />
               <Row label={`Chase Travel at ${card.travelBaseCpp.toFixed(2)}¢`} q="estimate" value={`${ptsRange(t.flight.chaseTravelPoints)} pts`} note={boostPts ? `If Points Boost at ${profile.pointsBoostCpp.toFixed(2)}¢ shows for a booking: ~${pts(boostPts)} pts. Only select bookings qualify.` : undefined} />
               <Row label={`Hotel (${t.nights} nights × ${t.rooms} room)`} q={t.hotel.quality} value={usdRange(t.hotel.cash)} note={t.hotel.note} />
