@@ -104,6 +104,19 @@ export function todayISO(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Calendar date (YYYY-MM-DD) of a stored value in the user's own timezone.
+ * Full timestamps (from nowISO(), stored in UTC) are converted to local time;
+ * plain dates are returned unchanged. Without this, a click made in the
+ * evening in the Americas is stamped "tomorrow" in UTC and fails the
+ * verification-window check.
+ */
+export function localDateOf(iso: string): string {
+  if (iso.length <= 10) return iso;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : todayISO(d);
+}
+
 export function daysBetween(aISO: string, bISO: string): number {
   const a = Date.parse(aISO.slice(0, 10) + 'T00:00:00Z');
   const b = Date.parse(bISO.slice(0, 10) + 'T00:00:00Z');
@@ -120,8 +133,9 @@ export function daysBetween(aISO: string, bISO: string): number {
 export function bonusState(b: TransferBonus, today = todayISO(), verifyWindowDays = 7): BonusState {
   if (b.endDate && b.endDate < today) return 'expired';
   if (b.startDate && b.startDate > today) return 'upcoming';
-  if (b.verifiedAt && daysBetween(b.verifiedAt, today) <= verifyWindowDays && daysBetween(b.verifiedAt, today) >= 0) {
-    return 'verified-active';
+  if (b.verifiedAt) {
+    const age = daysBetween(localDateOf(b.verifiedAt), today);
+    if (age >= 0 && age <= verifyWindowDays) return 'verified-active';
   }
   return 'needs-verification';
 }

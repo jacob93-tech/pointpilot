@@ -74,6 +74,16 @@ describe('bonus status', () => {
   it('stale verification falls back to needs verification', () => expect(bonusState({ ...base, verifiedAt: '2026-11-01' }, '2026-11-18', 7)).toBe('needs-verification'));
   it('expired bonus is expired even if it was verified', () => expect(bonusState({ ...base, verifiedAt: '2026-11-30' }, '2026-12-02')).toBe('expired'));
   it('the end date itself is still active', () => expect(bonusState({ ...base, verifiedAt: '2026-11-30' }, '2026-12-01')).toBe('verified-active'));
+  it('evening click in the Americas (already tomorrow in UTC) still counts as verified today', () => {
+    const prevTZ = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      // 4:19 pm PST on Nov 18 is 00:19 UTC on Nov 19.
+      expect(bonusState({ ...base, verifiedAt: '2026-11-19T00:19:55.000Z' }, '2026-11-18')).toBe('verified-active');
+    } finally {
+      process.env.TZ = prevTZ;
+    }
+  });
   it('upcoming bonus', () => expect(bonusState({ ...base, startDate: '2026-12-10', endDate: '2026-12-31' }, '2026-11-18')).toBe('upcoming'));
   it('bestBonusFor ignores unverified/expired unless asked', () => {
     const list = [base, { ...base, id: 'old', bonusPercent: 50, endDate: '2026-10-01', verifiedAt: '2026-09-30' }];
