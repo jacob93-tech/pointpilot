@@ -1,0 +1,9 @@
+# Optional: deploy with `npx wrangler deploy` from this folder.
+# Secrets (SERPAPI_KEY, APP_TOKEN) are NOT stored here — add them in the Cloudflare
+# dashboard (Worker → Settings → Variables and Secrets) or with `npx wrangler secret put`.
+name = "pointpilot-flights"
+main = "serpapi-relay.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://jacob93-tech.github.io,http://localhost:5173,http://localhost:4173"

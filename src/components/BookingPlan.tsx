@@ -13,6 +13,8 @@ import { cpp, fmtDate, pts, ptsRange, usd, usdRange } from '../lib/format';
 import { getCard } from '../data/cards';
 import { NO_PARTNER_AIRLINES, PROGRAMS_COMPILED } from '../data/programs';
 import { Badge, Button, ExternalLink, Field, Notice, NumberInput } from './ui';
+import { RealFlights, type ChosenFlight } from './RealFlights';
+import { partnersForAirlines } from '../engine/realFlights';
 
 const CABIN_WORD = { economy: 'Economy', premium: 'Premium economy', business: 'Business', first: 'First' } as const;
 
@@ -41,6 +43,13 @@ export function BookingPlan({
     [ctx, d, t.distanceMi, params.cabin, travelers, t.flight.cash, params.cardId],
   );
   const [picked, setPicked] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<ChosenFlight | null>(null);
+  const datesKey = dates.depart + dates.ret;
+  const [lastDates, setLastDates] = useState(datesKey);
+  if (lastDates !== datesKey) {
+    setLastDates(datesKey);
+    setChosen(null);
+  }
   const selected = options.find((o) => o.partner.id === picked) ?? options[0];
 
   const links = flightLinks({ origin: t.origin.code, dest: destAirport, depart: dates.depart, ret: dates.ret, travelers, cabin: params.cabin });
@@ -54,10 +63,10 @@ export function BookingPlan({
   return (
     <div className="space-y-5">
       <Notice title="Where the points number comes from">
-        The {t.flight.awardPoints ? ptsRange(t.flight.awardPoints) : '—'} points for flights isn’t from specific flights. It’s a typical saver-award range for a ~
+        The {t.flight.awardPoints ? ptsRange(t.flight.awardPoints) : '—'} points for flights on the card is a typical saver-award range for a ~
         {t.distanceMi.toLocaleString()}-mile round trip ({t.origin.code} ⇄ {destAirport}, {travelers} traveler{travelers > 1 ? 's' : ''}, {CABIN_WORD[params.cabin].toLowerCase()})
-        {t.flight.awardProgram ? `, with your verified +${t.flight.awardProgram.bonusPercent}% ${t.flight.awardProgram.name} bonus applied` : ''}. PointPilot has no free way to see real flights or award seats, so
-        here are the dates to search and exactly how to book. When you find a real flight, record it and PointPilot uses your numbers instead.
+        {t.flight.awardProgram ? `, with your verified +${t.flight.awardProgram.bonusPercent}% ${t.flight.awardProgram.name} bonus applied` : ''} — not a price for specific flights. Step 2 can pull
+        real flights and cash prices from Google Flights; award seats and points prices still have to be checked on the airline’s site (step 4). Record what you book and PointPilot uses your numbers.
       </Notice>
 
       {/* STEP 1 */}
@@ -102,6 +111,22 @@ export function BookingPlan({
         <p className="mt-1 text-xs text-slate-500">
           No Chase transfer partner books {NO_PARTNER_AIRLINES.join(', ')} — for those, pay cash or use Chase Travel (step 5).
         </p>
+        <RealFlights
+          airports={params.airports}
+          to={d.airports}
+          depart={dates.depart}
+          ret={dates.ret}
+          adults={travelers}
+          cabin={params.cabin}
+          options={options}
+          fallbackGoogleUrl={google.url}
+          chosenId={chosen?.flight.id}
+          onChoose={(c) => {
+            setChosen(c);
+            if (c.partnerId) setPicked(c.partnerId);
+            requestAnimationFrame(() => document.getElementById('booking-step-4')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+          }}
+        />
       </Step>
 
       {/* STEP 3 */}
@@ -171,7 +196,7 @@ export function BookingPlan({
       </Step>
 
       {/* STEP 4 */}
-      {selected && <Walkthrough o={selected} t={t} params={params} profile={profile} dates={dates} search={searchLinkFor(selected)} onRecord={() => nav(recordUrl)} />}
+      {selected && <Walkthrough o={selected} t={t} params={params} profile={profile} dates={dates} search={searchLinkFor(selected)} onRecord={() => nav(recordUrl)} chosen={chosen} />}
 
       {/* STEP 5 */}
       <Step n={5} title="Compare with Chase Travel before transferring">
@@ -199,7 +224,9 @@ function Walkthrough({
   dates,
   search,
   onRecord,
+  chosen,
 }: {
+  chosen: ChosenFlight | null;
   o: ProgramOption;
   t: TripEstimate;
   params: SearchParams;
@@ -219,6 +246,12 @@ function Walkthrough({
     setFound(null);
     setTaxes(null);
   }
+  const [lastChosen, setLastChosen] = useState<string | undefined>(undefined);
+  if (chosen && chosen.flight.id !== lastChosen) {
+    setLastChosen(chosen.flight.id);
+    setCash(chosen.flight.price);
+  }
+  const chosenOk = chosen ? partnersForAirlines(chosen.flight.airlines).includes(o.partner.id) : true;
   const vPct = o.verifiedBonus?.bonusPercent ?? 0;
   const plan = found ? planTransfer(found, o.ratio, vPct, o.partner.increment, o.partner.minTransfer) : null;
   const planIfReported = found && o.reportedBonus ? planTransfer(found, o.ratio, o.reportedBonus.bonusPercent, o.partner.increment, o.partner.minTransfer) : null;
@@ -229,7 +262,14 @@ function Walkthrough({
   const cabin = CABIN_WORD[params.cabin];
 
   return (
-    <Step n={4} title={`Book with ${o.partner.name} ${cur} — step by step`}>
+    <Step n={4} id="booking-step-4" title={`Book with ${o.partner.name} ${cur} — step by step`}>
+      {chosen && (
+        <div className={`mb-3 rounded-lg px-3 py-2 text-sm ${chosenOk ? 'bg-sky-50 dark:bg-sky-950/30' : 'bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200'}`}>
+          Using your chosen flight: <b>{chosen.flight.airlines.join(' + ')} {chosen.flight.legs.map((l) => l.flightNumber).join(', ')}</b>, {chosen.flight.legs[0].from} → {chosen.flight.legs[chosen.flight.legs.length - 1].to},{' '}
+          {chosen.flight.price != null ? `${usd(chosen.flight.price)} on Google Flights` : 'no price shown'}.
+          {!chosenOk && ` ${o.partner.name} may not be able to book ${chosen.flight.airlines.join(' + ')} — pick a partner marked for this flight.`}
+        </div>
+      )}
       <ol className="list-decimal space-y-2 pl-5 text-sm marker:font-semibold marker:text-brand-700">
         <li>
           <b>Get a free {o.partner.program} account</b> if you don’t have one: <ExternalLink href={o.partner.bookingUrl}>{o.partner.program}</ExternalLink>. You’ll need its member number to transfer.
@@ -247,7 +287,7 @@ function Walkthrough({
           )}
         </li>
         <li>
-          <b>Look for flights on {o.guide.books.slice(0, 3).join(', ')}</b>
+          <b>Look for {chosen && chosenOk ? `the same flight (${chosen.flight.legs.map((l) => l.flightNumber).join(', ')})` : `flights on ${o.guide.books.slice(0, 3).join(', ')}`}</b>
           {o.guide.books.length > 3 ? ' or another partner' : ''}. Write down the total {cur} and taxes for all travelers. {o.guide.pricingNote}
         </li>
         <li>
@@ -353,9 +393,9 @@ function HotelStep({ t, params, dates }: { t: TripEstimate; params: SearchParams
   );
 }
 
-function Step({ n, title, children, icon }: { n: number; title: string; children: React.ReactNode; icon?: React.ReactNode }) {
+function Step({ n, title, children, icon, id }: { n: number; title: string; children: React.ReactNode; icon?: React.ReactNode; id?: string }) {
   return (
-    <section className="rounded-xl border border-slate-200 p-3 sm:p-4 dark:border-slate-800">
+    <section id={id} className="scroll-mt-4 rounded-xl border border-slate-200 p-3 sm:p-4 dark:border-slate-800">
       <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold">
         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">{n}</span>
         {title}

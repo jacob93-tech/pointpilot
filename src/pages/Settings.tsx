@@ -8,6 +8,7 @@ import type { Cabin, CardId, TripStyle } from '../lib/types';
 import { CABINS, STYLES } from '../components/SearchForm';
 import { Button, Card, Chip, ExternalLink, Field, Input, Notice, NumberInput, PageHeader, Select, useToast } from '../components/ui';
 import { pts } from '../lib/format';
+import { RelaySettings } from '../components/RelaySettings';
 
 export function Settings() {
   const profile = useProfile();
@@ -113,6 +114,8 @@ export function Settings() {
         </Field>
       </Card>
 
+      <RelaySettings />
+
       <Card title={<span className="inline-flex items-center gap-2"><Database className="h-4 w-4" /> Your data</span>}>
         <Notice tone="warn" title="Browser-only storage">
           Trips, places, comparisons and settings live in this browser's IndexedDB. Clearing site data, using private browsing, or switching device/browser will lose them unless you export. Export regularly and import on another device.
@@ -149,7 +152,8 @@ export function Settings() {
       <Card title="Data sources & limits">
         <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700 dark:text-slate-300">
           <li><b>Transfer partners & bonuses:</b> seeded 2026-11-18 from public reporting; verified only by you. Chase has no public feed, so there is no automatic bonus updating.</li>
-          <li><b>Flight & hotel prices:</b> no free, permitted live source exists. Explore uses labeled heuristic estimates; real prices come from what you record.</li>
+          <li><b>Flight prices:</b> Explore rankings use labeled heuristic estimates. Real flights and cash fares come from Google Flights via your own optional SerpApi relay (above) or from quotes you record. Award-seat availability has no free source — check it on the airline’s site.</li>
+          <li><b>Hotel prices:</b> labeled estimates until you record a quote.</li>
           <li><b>Weather:</b> observed history from <ExternalLink href="https://open-meteo.com/">Open-Meteo</ExternalLink> (free, non-commercial), cached 90 days.</li>
           <li><b>Maps & places:</b> <ExternalLink href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</ExternalLink>; search via Nominatim (≤1 req/s) with Photon fallback.</li>
           <li><b>Routing:</b> FOSSGIS OSRM (routing.openstreetmap.de) and the OSRM demo server — donation-run, fair use. No free transit routing.</li>

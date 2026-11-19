@@ -21,7 +21,7 @@
 
 | Data | Free, permitted source? | What PointPilot does |
 |---|---|---|
-| Cash airfares | **No.** Google Flights has no public API. Amadeus Self-Service is being retired. Kiwi/Skyscanner need partnerships | Distance-based **estimates** (labeled), **prefilled Google Flights/Kayak links**, and **manual quote entry** that replaces estimates in rankings |
+| Cash airfares | **Only via your own free key.** Google Flights has no public API. Amadeus Self-Service closed on 2026-07-17. Kiwi/Skyscanner need partnerships. SerpApi's Google Flights API has a free monthly plan with no card, but it blocks browser calls | Rankings use distance-based **estimates** (labeled). The optional **Real flight search** pulls actual Google Flights results through *your* SerpApi free account and a free Cloudflare Worker relay (see below). Also: prefilled Google Flights/Kayak links and manual quotes, which replace estimates |
 | Award availability | **No.** Seats.aero, ExpertFlyer etc. are paid, and airline sites forbid scraping | **Prefilled award-search links** (United, Aeroplan, Southwest, JetBlue) plus landing links for other partners, and manual award entry with an availability status |
 | Transfer bonuses | **No public feed.** Chase's transfer screen requires login | Seeded from public reports (2026-11-18) as **Needs verification**, a one-click "I verified this on Chase" button, and a manual tracker. Status is **computed from dates** so expired bonuses can't show as active |
 | Transfer partners and ratios | No official machine-readable list | Seeded from public reports (incl. Hyatt 4:3 on Sapphire Preferred / Ink Preferred, Wyndham, and Cathay/Qantas flagged as newly reported). Editable and user-verifiable |
@@ -61,6 +61,8 @@
 - **Transfer bonus tracker and calculator:** standard vs effective ratio, start/end dates, eligibility, targeted flag, source, reported and verified dates, and computed status (Verified active / Needs verification / Expired / Upcoming). Integer math handles non-1:1 ratios, bonus %, flooring and 1,000-point increments, and shows the savings from a bonus.
 - **Flexible dates:** every valid date pair for the month or weekends, a calendar color-coded by your recorded prices, prefilled Google Flights/Kayak links per airport, and the best combination including ground costs.
 - **Award search links:** prefilled where the site supports it. Opening a link never implies availability.
+- **"How to book with points" plan per destination:** candidate dates, a prefilled Google Flights search, the Chase partners that book each airline (with estimated Chase points and **verified bonuses applied**), a step-by-step transfer and booking walkthrough with a live calculator, a Chase Travel comparison, and hotel steps. Cards show the plain points cost next to a highlighted **"with transfer bonus"** price. Reported but unverified bonuses appear only as a "bonus to unlock" hint.
+- **Real flight search (optional):** actual Google Flights results (airlines, flight numbers, times, stops, cash price) for the chosen dates. Each flight is tagged with the Chase partners that can book it, and "Use this flight" feeds its real price into the walkthrough. Results are cached 24 h, and a per-browser monthly cap keeps you under the free plan.
 
 ### Trip planning
 
@@ -82,7 +84,7 @@ Requires Node 20+.
 ```bash
 npm install
 npm run dev        # http://localhost:5173
-npm test           # 95 unit tests (transfer math, ranking, optimizer, storage, parsers…)
+npm test           # 117 unit tests (transfer math, ranking, optimizer, storage, parsers…)
 npm run build      # type-check + production build into dist/
 npm run preview    # serve the production build (service worker active)
 ```
@@ -101,7 +103,21 @@ The build in `dist/` is static and uses relative paths, so it works at a domain 
 
 **Cloudflare Pages (alternative):** create a Pages project from the repo with build command `npm run build` and output directory `dist`. It's served at `https://<project>.pages.dev`. The free plan needs no card.
 
-> Deployment is **not** done for you: it needs your GitHub or Cloudflare account. Nothing has been published.
+This repo is deployed with that workflow at https://jacob93-tech.github.io/pointpilot/.
+
+### Real flight search (optional, free)
+
+SerpApi blocks direct browser calls (they would expose your key), so a tiny Cloudflare Worker (`worker/serpapi-relay.js`) holds the key. It only answers your site's origins, and only with your app token. Both services have free plans with no payment method required. **Never add a card to either.** With no card on file, the worst case is that searches stop until next month.
+
+1. **SerpApi:** sign up at serpapi.com (Free plan). Copy your API key from the dashboard.
+2. **Cloudflare:** sign up at dash.cloudflare.com → **Workers & Pages → Create → Worker**. Name it `pointpilot-flights`, deploy the hello-world, then **Edit code**. Replace everything with the contents of `worker/serpapi-relay.js` and **Deploy**. (Or run `npx wrangler deploy` in `worker/`.)
+3. In the Worker go to **Settings → Variables and Secrets**:
+   - Secret `SERPAPI_KEY` = your SerpApi key.
+   - Secret `APP_TOKEN` = a long random passphrase you make up.
+   - Text `ALLOWED_ORIGINS` = `https://jacob93-tech.github.io,http://localhost:5173,http://localhost:4173`.
+4. In PointPilot → **Settings → Real flight search**, paste the Worker URL (`https://pointpilot-flights.<you>.workers.dev`) and the same app token, then **Save & test**. The test uses SerpApi's free account endpoint, which doesn't use a search.
+
+Each new date/airport/traveler combo uses one search. Identical searches within 24 h are served from cache, and you can set a monthly cap per browser in Settings. Award-seat availability is **not** included; no free source exists.
 
 ---
 
